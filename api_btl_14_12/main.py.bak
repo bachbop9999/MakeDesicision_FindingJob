@@ -1,0 +1,107 @@
+from module.db_module import *
+from module.data_module import *
+import pandas as pd
+import mysql
+import ahpy
+from module.TOPSIS_module import Topsis
+from module.TOPSIS_module import *
+from pyDecision.algorithm import topsis_method
+import numpy as np
+import pandas as pd
+from flask import Flask, jsonify, request
+from flask_cors import CORS, cross_origin
+app = Flask(__name__)
+cors = CORS(app)
+app.config['CORS_HEADERS'] = 'Content-Type'
+
+query = '''
+SELECT minSalary, maxSalary, fieldId , expYear ,degreeId, provinceId , districtId from jobv2;
+'''
+def get_job(query):
+    config = {
+        'host': 'localhost',
+        'user': 'root',
+        'password': 'root',
+        'database': 'bachhv1',
+        'raise_on_warnings': True
+    }
+
+    connect = mysql.connector.connect(**config)
+    connect = connect
+    cursor = connect.cursor()
+
+    cursor.execute(query)
+    records = cursor.fetchall()
+    print("Total number of rows of data: ", cursor.rowcount)
+    cursor.close()
+    connect.close()
+    return records
+
+def loadWeight():
+    df = pd.read_csv('criteria_job.csv')
+    return df
+
+#AHP#############3333
+a = 'lương min'
+b = 'lương max'
+c = 'nghành nghề'
+d = 'năm kinh nghiệm'
+e = 'bằng cấp'
+f = 'vị trí'
+comparisonMatrix = {
+    ('a', 'b'): 5/5, ('a', 'c'): 5/25, ('a', 'd'): 5/15, ('a', 'e'): 5/20, ('a', 'f'): 5/30,
+    ('b', 'c'): 5/25, ('b', 'd'): 5/15, ('b', 'e'): 5/20, ('b', 'f'): 5/30,
+    ('c', 'd'): 25/15, ('c', 'e'): 25/20, ('c', 'f'): 25/30,
+    ('d', 'e'): 10/20, ('d', 'f'): 10/30,
+    ('e', 'f'): 20/30,
+}
+
+complete = ahpy.Compare('Complete', comparisons=comparisonMatrix, precision=3, random_index='saaty')
+print(complete.target_weights)
+sort_target_weights = dict(sorted(complete.target_weights.items(), key=lambda item: item[0]))
+print(sort_target_weights)
+weights = []
+for key in sort_target_weights:
+    weights.append(sort_target_weights[key])
+print(weights)
+#print(complete.consistency_ratio) chỉ số nhất quán nhỏ hớn 10%
+print("{0:.1%}".format(complete.consistency_ratio))
+
+#weight = loadWeight()
+record2 = get_job(query)
+
+
+@app.route('/get_result', methods=['GET', 'POST'])
+def home():
+    if (request.method == 'POST'):
+        print(request.json['data'])
+
+        per = request.json['data']
+        jobs_Data = normalize_employee(record2, per)
+        df = pd.DataFrame(normalize_employee(record2, per),
+                          columns=['lương min', 'lương max', 'nghành nghề', 'năm kinh nghiệm', 'bằng cấp',
+                                   'vị trí'])
+        evaluation_matrix = np.array(df, np.float64)
+        criterias = np.array([True, True, True, True, True, True])
+        # luong_min,luong_max,nghanh_nghe,nam_kinh_nghiem, bang_cap,vi_tri
+        t = Topsis(evaluation_matrix, weights, criterias)
+        t.calc()
+
+        print("best_distance\t", t.best_distance)
+        print("worst_distance\t", t.worst_distance)
+
+        print("\nworst_similarity\t", t.worst_similarity)
+        print("rank_to_worst_similarity\t", t.rank_to_worst_similarity())
+
+        print("\nbest_similarity\t", t.best_similarity)
+        print("rank_to_best_similarity\t", t.rank_to_best_similarity())
+        print("ttttttttttt",type(t.rank_to_best_similarity()))
+        position = [int(x) for x in t.rank_to_best_similarity()]
+        mark = [float(x) for x in t.best_similarity]
+    return jsonify({'rank_candidates': [int(x) for x in t.rank_to_best_similarity()] ,'rank_mark': [mark[x-1] for x in position]})
+    # return [4, 2, 20, 8, 12, 14, 6, 16, 19, 3, 10, 7, 5, 9, 18, 17, 1, 13, 15, 11]
+
+if __name__ == '__main__':
+    app.run(host="localhost", port="5000", debug=True)
+    
+# nam 1, nu 0
